@@ -40,27 +40,27 @@ def rotx(t):
     """Rotation about the x-axis."""
     c = np.cos(t)
     s = np.sin(t)
-    return np.array([[1,  0,  0],
-                     [0,  c, -s],
-                     [0,  s,  c]])
+    return np.array([[1, 0, 0],
+                     [0, c, -s],
+                     [0, s, c]])
 
 
 def roty(t):
     """Rotation about the y-axis."""
     c = np.cos(t)
     s = np.sin(t)
-    return np.array([[c,  0,  s],
-                     [0,  1,  0],
-                     [-s, 0,  c]])
+    return np.array([[c, 0, s],
+                     [0, 1, 0],
+                     [-s, 0, c]])
 
 
 def rotz(t):
     """Rotation about the z-axis."""
     c = np.cos(t)
     s = np.sin(t)
-    return np.array([[c, -s,  0],
-                     [s,  c,  0],
-                     [0,  0,  1]])
+    return np.array([[c, -s, 0],
+                     [s, c, 0],
+                     [0, 0, 1]])
 
 
 def transform_from_rot_trans(R, t):
@@ -137,7 +137,7 @@ def load_oxts_packets_and_poses(oxts_files, origin_idx):
                 R, t = pose_from_oxts_packet(packet, scale)
 
                 T_w_imu = transform_from_rot_trans(R, t)
-                
+
                 if (len(oxts) >= origin_idx):
                     if origin is None:
                         # origin = t
@@ -145,8 +145,8 @@ def load_oxts_packets_and_poses(oxts_files, origin_idx):
 
                         # update previous poses
                         for o in range(len(oxts)):
-                            oxts[o] = oxts[o]._replace(T_w_imu = origin.dot(oxts[o].T_w_imu))
-                    
+                            oxts[o] = oxts[o]._replace(T_w_imu=origin.dot(oxts[o].T_w_imu))
+
                     T_w_imu = origin.dot(T_w_imu)
                     # T_w_imu = transform_from_rot_trans(R, t - origin)
 
@@ -176,7 +176,6 @@ def yield_velo_scans(velo_files):
     """Generator to parse velodyne binary files into arrays."""
     for file in velo_files:
         yield load_velo_scan(file)
-
 
 
 class raw:

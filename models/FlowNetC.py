@@ -23,7 +23,7 @@ class FlowNetC(nn.Module):
 
         self.corr = correlate #Correlation(pad_size=20, kernel_size=1, max_displacement=20, stride1=1, stride2=2, corr_multiply=1)
 
-        self.corr_activation = nn.LeakyReLU(0.1,inplace=True)
+        self.corr_activation = nn.LeakyReLU(0.1, inplace=True)
         self.conv3_1 = conv(self.batchNorm, 473,  256)
         self.conv4   = conv(self.batchNorm, 256,  512, stride=2)
         self.conv4_1 = conv(self.batchNorm, 512,  512)

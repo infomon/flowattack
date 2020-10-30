@@ -118,7 +118,7 @@ def init_patch_circle(image_size, patch_size):
 def circle_transform(patch, mask, patch_init, data_shape, patch_shape, margin=0, center=False, norotate=False, fixed_loc=(-1,-1)):
     # get dummy image
     patch = patch + np.random.random()*0.1 - 0.05
-    patch = np.clip(patch, 0.,1.)
+    patch = np.clip(patch, 0., 1.)
     patch = patch*mask
     x = np.zeros(data_shape)
     xm = np.zeros(data_shape)
@@ -128,9 +128,9 @@ def circle_transform(patch, mask, patch_init, data_shape, patch_shape, margin=0,
     image_w, image_h = data_shape[-1], data_shape[-2]
 
     zoom_factor = 1 + 0.05*(np.random.random() - 0.5)
-    patch = zoom(patch, zoom=(1,1,zoom_factor, zoom_factor), order=1)
-    mask = zoom(mask, zoom=(1,1,zoom_factor, zoom_factor), order=0)
-    patch_init = zoom(patch_init, zoom=(1,1,zoom_factor, zoom_factor), order=1)
+    patch = zoom(patch, zoom=(1, 1, zoom_factor, zoom_factor), order=1)
+    mask = zoom(mask, zoom=(1, 1, zoom_factor, zoom_factor), order=0)
+    patch_init = zoom(patch_init, zoom=(1, 1, zoom_factor, zoom_factor), order=1)
     patch_shape = patch.shape
     m_size = patch.shape[-1]
     for i in range(x.shape[0]):
@@ -185,8 +185,8 @@ def init_patch_square(image_size, patch_size):
     # get mask
     # image_size = image_size**2
     noise_size = image_size*patch_size
-    noise_dim = int(noise_size)#**(0.5))
-    patch = np.random.rand(1,3,noise_dim,noise_dim)
+    noise_dim = int(noise_size) #**(0.5))
+    patch = np.random.rand(1, 3, noise_dim, noise_dim)
     return patch, patch.shape
 
 def init_patch_from_image(image_path, mask_path, image_size, patch_size):

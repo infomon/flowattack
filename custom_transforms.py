@@ -57,13 +57,14 @@ class RandomHorizontalFlip(object):
 
 class RandomScaleCrop(object):
     """Randomly zooms images up to 15% and crop them to a particular size"""
+
     def __init__(self, h, w):
         self.h = h
         self.w = w
 
     def __call__(self, images):
         in_h, in_w, _ = images[0].shape
-        x_scaling, y_scaling = np.random.uniform(1,1.15,2)
+        x_scaling, y_scaling = np.random.uniform(1, 1.15, 2)
         scaled_h, scaled_w = int(in_h * y_scaling), int(in_w * x_scaling)
         scaled_images = [imresize(im, (scaled_h, scaled_w)) for im in images]
         offset_y = np.random.randint(scaled_h - self.h + 1)
@@ -71,8 +72,10 @@ class RandomScaleCrop(object):
         cropped_images = [im[offset_y:offset_y + self.h, offset_x:offset_x + self.w] for im in scaled_images]
         return cropped_images
 
+
 class RandomCrop(object):
     """Randomly zooms images up to 15% and crop them to a particular size"""
+
     def __init__(self, h, w):
         self.h = h
         self.w = w
@@ -84,8 +87,10 @@ class RandomCrop(object):
         cropped_images = [im[offset_y:offset_y + self.h, offset_x:offset_x + self.w] for im in images]
         return cropped_images
 
+
 class Scale(object):
     """Scales images to a particular size"""
+
     def __init__(self, h, w):
         self.h = h
         self.w = w
@@ -93,7 +98,7 @@ class Scale(object):
     def __call__(self, images):
 
         in_h, in_w, _ = images[0].shape
-        scaled_h, scaled_w = self.h , self.w
+        scaled_h, scaled_w = self.h, self.w
 
         scaled_images = [imresize(im, (scaled_h, scaled_w)) for im in images]
 

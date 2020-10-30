@@ -16,6 +16,7 @@ import cv2
 def load_as_float(path):
     return np.array(Image.open(path)).astype(np.float32)
 
+
 class ValidationFlowKitti2015MV(data.Dataset):
     """
         Kitti 2015 flow loader
@@ -40,11 +41,17 @@ class ValidationFlowKitti2015MV(data.Dataset):
         scene = index // 20
         frame = index % 20
 
-        tgt_img_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(scene).zfill(6)+'_'+str(frame).zfill(2)+'.png')
-        ref_img_past_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(scene).zfill(6)+'_'+str(frame-1).zfill(2)+'.png')
-        ref_img_future_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(scene).zfill(6)+'_'+str(frame+1).zfill(2)+'.png')
-        gt_flow_path = self.root.joinpath('data_scene_flow', self.phase, 'flow_occ', str(scene).zfill(6)+'_'+str(frame).zfill(2)+'.png')
-        gt_disp_path = self.root.joinpath('data_scene_flow', self.phase, 'disp_occ_0', str(scene).zfill(6)+'_'+str(frame).zfill(2)+'.png')
+        # tgt_img_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(scene).zfill(6)+'_'+str(frame).zfill(2)+'.png')
+        # ref_img_past_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(scene).zfill(6)+'_'+str(frame-1).zfill(2)+'.png')
+        # ref_img_future_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(scene).zfill(6)+'_'+str(frame+1).zfill(2)+'.png')
+        # gt_flow_path = self.root.joinpath('data_scene_flow', self.phase, 'flow_occ', str(scene).zfill(6)+'_'+str(frame).zfill(2)+'.png')
+        # gt_disp_path = self.root.joinpath('data_scene_flow', self.phase, 'disp_occ_0', str(scene).zfill(6)+'_'+str(frame).zfill(2)+'.png')
+
+        tgt_img_path = self.root.joinpath(self.phase, 'image_2', str(scene).zfill(6)+'_'+str(frame).zfill(2)+'.png')
+        ref_img_past_path = self.root.joinpath(self.phase, 'image_2', str(scene).zfill(6)+'_'+str(frame-1).zfill(2)+'.png')
+        ref_img_future_path = self.root.joinpath(self.phase, 'image_2', str(scene).zfill(6)+'_'+str(frame+1).zfill(2)+'.png')
+        gt_flow_path = self.root.joinpath(self.phase, 'flow_occ', str(scene).zfill(6)+'_'+str(frame).zfill(2)+'.png')
+        gt_disp_path = self.root.joinpath(self.phase, 'disp_occ_0', str(scene).zfill(6)+'_'+str(frame).zfill(2)+'.png')
 
         tgt_img = load_as_float(tgt_img_path)
         ref_img_future = load_as_float(ref_img_future_path)
@@ -57,9 +64,9 @@ class ValidationFlowKitti2015MV(data.Dataset):
 
         gtFlow = None
         if os.path.exists(gt_flow_path):
-            u,v,valid = flow_io.flow_read_png(str(gt_flow_path))
-            gtFlow = np.dstack((u,v,valid))
-            gtFlow = torch.FloatTensor(gtFlow.transpose(2,0,1))
+            u, v, valid = flow_io.flow_read_png(str(gt_flow_path))
+            gtFlow = np.dstack((u, v, valid))
+            gtFlow = torch.FloatTensor(gtFlow.transpose(2, 0, 1))
         else:
             gtFlow = torch.zeros((3, he, wi))
 
@@ -67,7 +74,7 @@ class ValidationFlowKitti2015MV(data.Dataset):
         gtDisp = None
         if os.path.exists(gt_flow_path):
             gtDisp = load_as_float(gt_disp_path)
-            gtDisp = np.array(gtDisp,  dtype=float) / 256.
+            gtDisp = np.array(gtDisp, dtype=float) / 256.
         else:
             gtDisp = torch.zeros((he, wi, 1))
 
@@ -86,6 +93,7 @@ class ValidationFlowKitti2015MV(data.Dataset):
 
     def __len__(self):
         return self.N
+
 
 class ValidationFlowKitti2015(data.Dataset):
     """
@@ -108,7 +116,7 @@ class ValidationFlowKitti2015(data.Dataset):
 
         self.mapping = [None] * N
         if true_motion:
-            mapping_file_path = os.path.join(raw_root,'train_mapping.txt')
+            mapping_file_path = os.path.join(raw_root, 'train_mapping.txt')
             if os.path.exists(mapping_file_path):
                 with open(mapping_file_path) as mapping_file:
                     lines = mapping_file.readlines()
@@ -123,22 +131,28 @@ class ValidationFlowKitti2015(data.Dataset):
     def __getitem__(self, index):
         index = self.start + index
 
-        tgt_img_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(index).zfill(6)+'_10.png')
-        ref_img_past_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(index).zfill(6)+'_09.png')
-        ref_img_future_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(index).zfill(6)+'_11.png')
-        gt_flow_path = self.root.joinpath('data_scene_flow', self.phase, 'flow_occ', str(index).zfill(6)+'_10.png')
-        gt_disp_path = self.root.joinpath('data_scene_flow', self.phase, 'disp_occ_0', str(index).zfill(6)+'_10.png')
+        # tgt_img_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(index).zfill(6)+'_10.png')
+        # ref_img_past_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(index).zfill(6)+'_09.png')
+        # ref_img_future_path = self.root.joinpath('data_scene_flow_multiview', self.phase, 'image_2',str(index).zfill(6)+'_11.png')
+        # gt_flow_path = self.root.joinpath('data_scene_flow', self.phase, 'flow_occ', str(index).zfill(6)+'_10.png')
+        # gt_disp_path = self.root.joinpath('data_scene_flow', self.phase, 'disp_occ_0', str(index).zfill(6)+'_10.png')
+
+        tgt_img_path = self.root.joinpath(self.phase, 'image_2', str(index).zfill(6)+'_10.png')
+        ref_img_past_path = self.root.joinpath(self.phase, 'image_2', str(index).zfill(6)+'_09.png')
+        ref_img_future_path = self.root.joinpath(self.phase, 'image_2', str(index).zfill(6)+'_11.png')
+        gt_flow_path = self.root.joinpath(self.phase, 'flow_occ', str(index).zfill(6)+'_10.png')
+        gt_disp_path = self.root.joinpath(self.phase, 'disp_occ_0', str(index).zfill(6)+'_10.png')
 
         tgt_img = load_as_float(tgt_img_path)
         ref_img_past = load_as_float(ref_img_past_path)
         ref_img_future = load_as_float(ref_img_future_path)
-        u,v,valid = flow_io.flow_read_png(str(gt_flow_path))
-        gtFlow = np.dstack((u,v,valid))
-        gtFlow = torch.FloatTensor(gtFlow.transpose(2,0,1))
+        u, v, valid = flow_io.flow_read_png(str(gt_flow_path))
+        gtFlow = np.dstack((u, v, valid))
+        gtFlow = torch.FloatTensor(gtFlow.transpose(2, 0, 1))
 
         # read disparity
         gtDisp = load_as_float(gt_disp_path)
-        gtDisp = np.array(gtDisp,  dtype=float) / 256.
+        gtDisp = np.array(gtDisp, dtype=float) / 256.
         calib = {}
         poses = {}
         # get calibrations
@@ -188,23 +202,23 @@ class ValidationFlowKitti2015(data.Dataset):
             if len(calib) > 0 and (in_h != out_h or in_w != out_w):
                 sx = float(out_h) / float(in_h)
                 sy = float(out_w) / float(in_w)
-                calib['cam']['P_rect_00'][0,0] *= sx
-                calib['cam']['P_rect_00'][1,1] *= sy
-                calib['cam']['P_rect_00'][0,2] *= sx
-                calib['cam']['P_rect_00'][1,2] *= sy
+                calib['cam']['P_rect_00'][0, 0] *= sx
+                calib['cam']['P_rect_00'][1, 1] *= sy
+                calib['cam']['P_rect_00'][0, 2] *= sx
+                calib['cam']['P_rect_00'][1, 2] *= sy
 
         # set baseline, focal length and principal points
         if len(calib) > 0:
-            calib['cam']['focal_length_x'] = calib['cam']['P_rect_00'][0,0]
-            calib['cam']['focal_length_y'] = calib['cam']['P_rect_00'][1,1]
-            calib['cam']['cx'] = calib['cam']['P_rect_00'][0,2]
-            calib['cam']['cy'] = calib['cam']['P_rect_00'][1,2]
+            calib['cam']['focal_length_x'] = calib['cam']['P_rect_00'][0, 0]
+            calib['cam']['focal_length_y'] = calib['cam']['P_rect_00'][1, 1]
+            calib['cam']['cx'] = calib['cam']['P_rect_00'][0, 2]
+            calib['cam']['cy'] = calib['cam']['P_rect_00'][1, 2]
 
             # FROM IMU to IMG00
             calib['P_imu_cam'] = calib['cam']["R_rect_00"].dot(calib['vel2cam']["RT"].dot(calib['imu2vel']["RT"]))
             calib['P_imu_img'] = calib['cam']["P_rect_00"].dot(calib['P_imu_cam'])
 
-        #if self.compression > 0 :
+        # if self.compression > 0 :
         #    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100 - self.compression]
         #    ref_img_past = cv2.imencode('.jpg', ref_img_past, encode_param)
         #    tgt_img = cv2.imencode('.jpg', tgt_img, encode_param)
@@ -214,6 +228,7 @@ class ValidationFlowKitti2015(data.Dataset):
 
     def __len__(self):
         return self.N
+
 
 class ValidationFlowKitti2012(data.Dataset):
     """
@@ -231,18 +246,18 @@ class ValidationFlowKitti2012(data.Dataset):
         self.flow_w = flow_w
 
     def __getitem__(self, index):
-        tgt_img_path =  self.root.joinpath('data_stereo_flow', self.phase, 'colored_0',str(index).zfill(6)+'_10.png')
-        ref_img_past_path =  self.root.joinpath('data_stereo_flow', self.phase, 'colored_0',str(index).zfill(6)+'_11.png')
-        ref_img_future_path =  self.root.joinpath('data_stereo_flow', self.phase, 'colored_0',str(index).zfill(6)+'_11.png')
-        gt_flow_path = self.root.joinpath('data_stereo_flow', self.phase, 'flow_occ', str(index).zfill(6)+'_10.png')
+        tgt_img_path = self.root.joinpath(self.phase, 'colored_0', str(index).zfill(6)+'_10.png')
+        ref_img_past_path = self.root.joinpath(self.phase, 'colored_0', str(index).zfill(6)+'_11.png')
+        ref_img_future_path = self.root.joinpath(self.phase, 'colored_0', str(index).zfill(6)+'_11.png')
+        gt_flow_path = self.root.joinpath(self.phase, 'flow_occ', str(index).zfill(6)+'_10.png')
 
         tgt_img = load_as_float(tgt_img_path)
         ref_img_past = load_as_float(ref_img_past_path)
         ref_img_future = load_as_float(ref_img_future_path)
 
-        u,v,valid = flow_io.flow_read_png(gt_flow_path)
-        gtFlow = np.dstack((u,v,valid))
-        gtFlow = torch.FloatTensor(gtFlow.transpose(2,0,1))
+        u, v, valid = flow_io.flow_read_png(gt_flow_path)
+        gtFlow = np.dstack((u, v, valid))
+        gtFlow = torch.FloatTensor(gtFlow.transpose(2, 0, 1))
 
         if self.transform is not None:
             imgs = self.transform([tgt_img] + [ref_img_past] + [ref_img_future])
@@ -250,13 +265,13 @@ class ValidationFlowKitti2012(data.Dataset):
             ref_img_past = imgs[1]
             ref_img_future = imgs[2]
 
-        #if self.compression is not None:
+        # if self.compression is not None:
         #    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), self.compression]
         #    ref_img_past = cv2.imencode('.jpg', ref_img_past, encode_param)
         #    tgt_img = cv2.imencode('.jpg', tgt_img, encode_param)
         #    ref_img_future = cv2.imencode('.jpg', ref_img_future, encode_param)
 
-        return ref_img_past, tgt_img, ref_img_future, gtFlow, None, None,
+        return ref_img_past, tgt_img, ref_img_future, gtFlow, None, None, None
 
     def __len__(self):
         return self.N

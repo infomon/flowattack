@@ -12,3 +12,13 @@ tensorboardX
 pypng
 scikit-image
 opencv-python
+joblib
+path
+scipy
+blessings
+progressbar
+tensorboardX
+pypng
+scikit-image
+rawpy
+tensorboard

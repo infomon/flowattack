@@ -7,6 +7,7 @@ import numpy as np
 from joblib import Parallel, delayed
 from tqdm import tqdm
 from path import Path
+import os
 
 parser = argparse.ArgumentParser()
 parser.add_argument("dataset_dir", metavar='DIR',
@@ -82,13 +83,20 @@ def main():
     with open(args.dump_root / 'train.txt', 'w') as tf:
         with open(args.dump_root / 'val.txt', 'w') as vf:
             for s in tqdm(subfolders):
+                #gt_missing = False
+                #for f in os.listdir(s):
+                #    if 'jpg' in f:
+                #        if not os.path.exists(f.replace('jpg', 'npy')):
+                #            gt_missing = True
+                #            print('To val since no gt exist ' + s)
+                #            break
                 if np.random.random() < 0.1:
                     vf.write('{}\n'.format(s.name))
                 else:
                     tf.write('{}\n'.format(s.name))
                     # remove useless groundtruth data for training comment if you don't want to erase it
-                    for gt_file in s.files('*.npy'):
-                        gt_file.remove_p()
+                    #for gt_file in s.files('*.npy'):
+                    #    gt_file.remove_p()
 
 
 if __name__ == '__main__':

@@ -1,27 +1,30 @@
 import argparse
+
+from PIL import Image
+import cv2
 import numpy as np
 from numpy.linalg import inv
-from scipy.misc import imread, imresize
-from tqdm import tqdm
-from PIL import Image
-
+from path import Path
+from tensorboardX import SummaryWriter
 import torch
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
-import torch.optim
 import torch.nn as nn
+import torch.optim
 import torch.utils.data
-
-import cv2
+import torchvision.transforms.functional as TF
+from tqdm import tqdm
+import os
 
 import custom_transforms
+from flowutils.flowlib import flow_to_image, interp_gt_flow
+from logger import AverageMeter
+from losses import compute_cossim, compute_epe, multiscale_cossim
 import models
 from utils import *
-from logger import AverageMeter
-from path import Path
-from tensorboardX import SummaryWriter
-from flowutils.flowlib import flow_to_image,interp_gt_flow
-from losses import compute_epe, compute_cossim, multiscale_cossim
+print(torch.cuda.is_available())
+
+
 
 epsilon = 1e-8
 
@@ -29,8 +32,10 @@ parser = argparse.ArgumentParser(description='Test Adversarial attacks on Optica
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--name', dest='name', default='', required=True,
                     help='path to dataset')
-parser.add_argument('--patch_path', dest='patch_path', default='',
+parser.add_argument('--pretrained', dest='pretrained', default='', required=True,
                     help='path to dataset')
+parser.add_argument('--patch_path', dest='patch_path', default='', required=True,
+                    help='path to patches')
 parser.add_argument('--whole_img', dest='whole_img', default=0.0, type=float,
                     help='Test whole image attack')
 parser.add_argument('--compression', dest='compression', default=0.0, type=float,
@@ -52,7 +57,7 @@ parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
 #                     metavar='N', help='mini-batch size')
 parser.add_argument('--flownet', dest='flownet', type=str, default='FlowNetC', choices=['FlowNetS', 'FlowNetC', 'SpyNet', 'FlowNet2', 'PWCNet', 'Back2Future'],
                     help='flow network architecture. Options: FlowNetS | SpyNet')
-#parser.add_argument('--image_size', type=int, default=384, help='the min(height, width) of the input image to network')
+# parser.add_argument('--image_size', type=int, default=384, help='the min(height, width) of the input image to network')
 parser.add_argument('--patch_type', type=str, default='circle', help='patch type: circle or square')
 parser.add_argument('--norotate', action='store_true', help='will display progressbar at terminal')
 parser.add_argument('--true_motion', action='store_true', help='use the true motion according to static scene if intrinsics and depth are available')
@@ -62,11 +67,13 @@ def main():
     global args
     args = parser.parse_args()
     save_path = Path(args.name)
-    args.save_path = 'results'/save_path #/timestamp
+    args.save_path = save_path / 'results'  # /timestamp
     print('=> will save everything to {}'.format(args.save_path))
     args.save_path.makedirs_p()
     output_vis_dir = args.save_path / 'images'
     output_vis_dir.makedirs_p()
+
+    pretrained_path = Path(args.pretrained)
 
     args.batch_size = 1
 
@@ -75,58 +82,56 @@ def main():
     # Data loading code
     flow_loader_h, flow_loader_w = 384, 1280
 
-    normalize = custom_transforms.Normalize(mean=[0.5, 0.5, 0.5],
-                                             std=[0.5, 0.5, 0.5])
+    normalize = custom_transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 
     # valid_transform = custom_transforms.Compose([custom_transforms.Scale(h=flow_loader_h, w=flow_loader_w),
     #                         custom_transforms.ArrayToTensor(), normalize])
-    valid_transform = custom_transforms.Compose([custom_transforms.Scale(h=flow_loader_h, w=flow_loader_w),
-                            custom_transforms.ArrayToTensor()])
+    valid_transform = custom_transforms.Compose([custom_transforms.Scale(h=flow_loader_h, w=flow_loader_w), custom_transforms.ArrayToTensor()])
 
-    if args.valset =="kitti2015":
+    if args.valset == "kitti2015":
         # from datasets.validation_flow import ValidationFlowKitti2015MV
         # val_set = ValidationFlowKitti2015MV(root='/ps/project/datasets/AllFlowData/kitti/kitti2015', transform=valid_transform, compression=args.compression, raw_root='/is/rg/avg/jjanai/data/Kitti_2012_2015/Raw', example=args.example, true_motion=args.true_motion)
         from datasets.validation_flow import ValidationFlowKitti2015
         # # val_set = ValidationFlowKitti2015(root='/is/ps2/aranjan/AllFlowData/kitti/kitti2015', transform=valid_transform, compression=args.compression)
-        val_set = ValidationFlowKitti2015(root='/ps/project/datasets/AllFlowData/kitti/kitti2015', transform=valid_transform, compression=args.compression, raw_root='/is/rg/avg/jjanai/data/Kitti_2012_2015/Raw', example=args.example, true_motion=args.true_motion)
-    elif args.valset =="kitti2012":
+        val_set = ValidationFlowKitti2015(root='/misc/lmbraid19/schrodi/KITTI/2015', transform=valid_transform, compression=args.compression, raw_root='/misc/lmbraid19/schrodi/KITTI/2012/raw', example=args.example, true_motion=args.true_motion)
+    elif args.valset == "kitti2012":
         from datasets.validation_flow import ValidationFlowKitti2012
         # val_set = ValidationFlowKitti2012(root='/is/ps2/aranjan/AllFlowData/kitti/kitti2012', transform=valid_transform, compression=args.compression)
-        val_set = ValidationFlowKitti2012(root='/ps/project/datasets/AllFlowData/kitti/kitti2012', transform=valid_transform, compression=args.compression, raw_root='/is/rg/avg/jjanai/data/Kitti_2012_2015/Raw')
+        val_set = ValidationFlowKitti2012(root='/misc/lmbraid19/schrodi/KITTI/2012_val', transform=valid_transform, compression=args.compression, raw_root='/misc/lmbraid19/schrodi/KITTI/2012/raw')
 
     print('{} samples found in valid scenes'.format(len(val_set)))
 
-    val_loader = torch.utils.data.DataLoader(val_set, batch_size=1,               # batch size is 1 since images in kitti have different sizes
-                    shuffle=False, num_workers=args.workers, pin_memory=True, drop_last=True)
+    # batch size is 1 since images in kitti have different sizes
+    val_loader = torch.utils.data.DataLoader(val_set, batch_size=1, shuffle=False, num_workers=args.workers, pin_memory=True, drop_last=True)
 
-    result_file = open(os.path.join(args.save_path,'results.csv'),'a')
-    result_scene_file = open(os.path.join(args.save_path,'result_scenes.csv'),'a')
+    result_file = open(os.path.join(args.save_path, 'results.csv'), 'a')
+    result_scene_file = open(os.path.join(args.save_path, 'result_scenes.csv'), 'a')
 
     # create model
     print("=> fetching model")
 
-    if args.flownet=='SpyNet':
+    if args.flownet == 'SpyNet':
         flow_net = getattr(models, args.flownet)(nlevels=6, pretrained=True)
-    elif args.flownet=='Back2Future':
-        flow_net = getattr(models, args.flownet)(pretrained='pretrained/b2f_rm_hard.pth.tar')
-    elif args.flownet=='PWCNet':
-        flow_net = models.pwc_dc_net('pretrained/pwc_net_chairs.pth.tar') # pwc_net.pth.tar')
+    elif args.flownet == 'Back2Future':
+        flow_net = getattr(models, args.flownet)(pretrained=pretrained_path/'b2f_rm_hard.pth.tar')
+    elif args.flownet == 'PWCNet':
+        flow_net = models.pwc_dc_net(pretrained_path/'pwc_net_chairs.pth.tar')  # pwc_net.pth.tar')
     else:
         flow_net = getattr(models, args.flownet)()
 
     if args.flownet in ['SpyNet', 'Back2Future', 'PWCNet']:
-        print("=> using pre-trained weights for "+ args.flownet)
+        print("=> using pre-trained weights for " + args.flownet)
     elif args.flownet in ['FlowNetC']:
         print("=> using pre-trained weights for FlowNetC")
-        weights = torch.load('pretrained/FlowNet2-C_checkpoint.pth.tar')
+        weights = torch.load(pretrained_path / 'FlowNet2-C_checkpoint.pth.tar')
         flow_net.load_state_dict(weights['state_dict'])
     elif args.flownet in ['FlowNetS']:
         print("=> using pre-trained weights for FlowNetS")
-        weights = torch.load('pretrained/flownets.pth.tar')
+        weights = torch.load(pretrained_path/'flownets.pth.tar')
         flow_net.load_state_dict(weights['state_dict'])
     elif args.flownet in ['FlowNet2']:
         print("=> using pre-trained weights for FlowNet2")
-        weights = torch.load('pretrained/FlowNet2_checkpoint.pth.tar')
+        weights = torch.load(pretrained_path/'FlowNet2_checkpoint.pth.tar')
         flow_net.load_state_dict(weights['state_dict'])
     else:
         flow_net.init_weights()
@@ -134,19 +139,20 @@ def main():
     flow_net = flow_net.cuda()
 
     cudnn.benchmark = True
-
     if args.whole_img == 0 and args.compression == 0:
         print("Loading patch from ", args.patch_path)
-        patch = torch.load(args.patch_path)
+        # patch = torch.load(args.patch_path)
+        image = Image.open(args.patch_path)
+        patch = TF.to_tensor(image).unsqueeze(0)
         patch_shape = patch.shape
         if args.mask_path:
             mask_image = load_as_float(args.mask_path)
-            mask_image = imresize(mask_image, (patch_shape[-1], patch_shape[-2]))/256.
-            mask = np.array([mask_image.transpose(2,0,1)])
+            mask_image = cv2.imresize(mask_image, (patch_shape[-1], patch_shape[-2]))/256.
+            mask = np.array([mask_image.transpose(2, 0, 1)])
         else:
             if args.patch_type == 'circle':
                 mask = createCircularMask(patch_shape[-2], patch_shape[-1]).astype('float32')
-                mask = np.array([[mask,mask,mask]])
+                mask = np.array([[mask, mask, mask]])
             elif args.patch_type == 'square':
                 mask = np.ones(patch_shape)
     else:
@@ -154,11 +160,11 @@ def main():
         mean = 0
         var = 1
         sigma = var**0.5
-        patch = np.random.normal(mean,sigma,(flow_loader_h,flow_loader_w,3))
+        patch = np.random.normal(mean, sigma, (flow_loader_h, flow_loader_w, 3))
         patch = patch.reshape(3, flow_loader_h, flow_loader_w)
         mask = np.ones(patch.shape) * args.whole_img
 
-    #import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()
     error_names = ['epe', 'adv_epe', 'cos_sim', 'adv_cos_sim']
     errors = AverageMeter(i=len(error_names))
 
@@ -192,9 +198,9 @@ def main():
         random_y = args.fixed_loc_y
         if args.whole_img == 0:
             if args.patch_type == 'circle':
-                patch_full, mask_full, _, random_x, random_y, _ = circle_transform(patch, mask, patch.copy(), data_shape, patch_shape, margin, norotate=args.norotate, fixed_loc=(random_x, random_y))
+                patch_full, mask_full, _, random_x, random_y, _ = circle_transform(patch, mask, patch.clone(), data_shape, patch_shape, margin, norotate=args.norotate, fixed_loc=(random_x, random_y))
             elif args.patch_type == 'square':
-                patch_full, mask_full, _, _, _ = square_transform(patch, mask, patch.copy(), data_shape, patch_shape, norotate=args.norotate)
+                patch_full, mask_full, _, _, _ = square_transform(patch, mask, patch.clone(), data_shape, patch_shape, norotate=args.norotate)
             patch_full, mask_full = torch.FloatTensor(patch_full), torch.FloatTensor(mask_full)
         else:
             patch_full, mask_full = torch.FloatTensor(patch), torch.FloatTensor(mask)
@@ -246,27 +252,27 @@ def main():
 
             # transform
             T_p_cam0 = np.eye(4)
-            T_p_cam0[0:4,3:4] = p_cam0
+            T_p_cam0[0:4, 3:4] = p_cam0
 
             # transformation to generate patch points
             patch_size = -0.25
-            pts = np.array([[0,0,0,1],[0,patch_size,0,1], [patch_size,0,0,1], [patch_size,patch_size,0,1]]).T
+            pts = np.array([[0, 0, 0, 1], [0, patch_size, 0, 1], [patch_size, 0, 0, 1], [patch_size, patch_size, 0, 1]]).T
             pts = inv(imu2cam).dot(T_p_cam0.dot(pts))
 
             # get points in reference image
             pts_src = pose_ref.dot(pts)
             pts_src = imu2img.dot(pts_src)
-            pts_src = pts_src[:3,:] / pts_src[2:3,:].repeat(3,0)
+            pts_src = pts_src[:3, :] / pts_src[2:3, :].repeat(3, 0)
 
             # get points in past image
             pts_past = pose_past.dot(pts)
             pts_past = imu2img.dot(pts_past)
-            pts_past = pts_past[:3,:] / pts_past[2:3,:].repeat(3,0)
+            pts_past = pts_past[:3, :] / pts_past[2:3, :].repeat(3, 0)
 
             # get points in future image
             pts_fut = pose_fut.dot(pts)
             pts_fut = imu2img.dot(pts_fut)
-            pts_fut = pts_fut[:3,:] / pts_fut[2:3,:].repeat(3,0)
+            pts_fut = pts_fut[:3, :] / pts_fut[2:3, :].repeat(3, 0)
 
             # find homography between points
             H_past, _ = cv2.findHomography(pts_src.T, pts_past.T, cv2.RANSAC)
@@ -274,52 +280,52 @@ def main():
 
             # import pdb; pdb.set_trace()
             refMtrx = torch.from_numpy(H_fut).float().cuda()
-            refMtrx = refMtrx.repeat(args.batch_size,1,1)
+            refMtrx = refMtrx.repeat(args.batch_size, 1, 1)
             # get pixel origins
-            X,Y = np.meshgrid(np.arange(flow_loader_w),np.arange(flow_loader_h))
-            X,Y = X.flatten(),Y.flatten()
-            XYhom = np.stack([X,Y,np.ones_like(X)],axis=1).T
-            XYhom = np.tile(XYhom,[args.batch_size,1,1]).astype(np.float32)
+            X, Y = np.meshgrid(np.arange(flow_loader_w), np.arange(flow_loader_h))
+            X, Y = X.flatten(), Y.flatten()
+            XYhom = np.stack([X, Y, np.ones_like(X)], axis=1).T
+            XYhom = np.tile(XYhom, [args.batch_size, 1, 1]).astype(np.float32)
             XYhom = torch.from_numpy(XYhom).cuda()
-            XHom,YHom,Zom = torch.unbind(XYhom,dim=1)
-            XHom = XHom.resize_((args.batch_size,flow_loader_h,flow_loader_w))
-            YHom = YHom.resize_((args.batch_size,flow_loader_h,flow_loader_w))
+            XHom, YHom, Zom = torch.unbind(XYhom, dim=1)
+            XHom = XHom.resize_((args.batch_size, flow_loader_h, flow_loader_w))
+            YHom = YHom.resize_((args.batch_size, flow_loader_h, flow_loader_w))
             # warp the canonical coordinates
             XYwarpHom = refMtrx.matmul(XYhom)
-            XwarpHom,YwarpHom,ZwarpHom = torch.unbind(XYwarpHom,dim=1)
-            Xwarp = (XwarpHom/(ZwarpHom+1e-8)).resize_((args.batch_size,flow_loader_h,flow_loader_w))
-            Ywarp = (YwarpHom/(ZwarpHom+1e-8)).resize_((args.batch_size,flow_loader_h,flow_loader_w))
+            XwarpHom, YwarpHom, ZwarpHom = torch.unbind(XYwarpHom, dim=1)
+            Xwarp = (XwarpHom/(ZwarpHom+1e-8)).resize_((args.batch_size, flow_loader_h, flow_loader_w))
+            Ywarp = (YwarpHom/(ZwarpHom+1e-8)).resize_((args.batch_size, flow_loader_h, flow_loader_w))
             # get forward flow
             u = (XHom - Xwarp).unsqueeze(1)
             v = (YHom - Ywarp).unsqueeze(1)
             flow = torch.cat((u, v), 1)
             flow = nn.functional.upsample(flow, size=(h_gt, w_gt), mode='bilinear')
-            flow[:,0,:,:] = flow[:,0,:,:] * (w_gt/flow_loader_w)
-            flow[:,1,:,:] = flow[:,1,:,:] * (h_gt/flow_loader_h)
-            forward_patch_flow[:,:2,:,:] = flow
+            flow[:, 0, :, :] = flow[:, 0, :, :] * (w_gt/flow_loader_w)
+            flow[:, 1, :, :] = flow[:, 1, :, :] * (h_gt/flow_loader_h)
+            forward_patch_flow[:, :2, :, :] = flow
             # get grid for resampling
             Xwarp = 2 * ((Xwarp / (flow_loader_w - 1)) - 0.5)
             Ywarp = 2 * ((Ywarp / (flow_loader_h - 1)) - 0.5)
-            grid = torch.stack([Xwarp,Ywarp],dim=-1)
+            grid = torch.stack([Xwarp, Ywarp], dim=-1)
             # sampling with bilinear interpolation
-            patch_var_future = torch.nn.functional.grid_sample(patch_var,grid,mode="bilinear")
-            mask_var_future = torch.nn.functional.grid_sample(mask_var,grid,mode="bilinear")
+            patch_var_future = torch.nn.functional.grid_sample(patch_var, grid, mode="bilinear")
+            mask_var_future = torch.nn.functional.grid_sample(mask_var, grid, mode="bilinear")
 
             # use past homography
             refMtrxP = torch.from_numpy(H_past).float().cuda()
-            refMtrx = refMtrx.repeat(args.batch_size,1,1)
+            refMtrx = refMtrx.repeat(args.batch_size, 1, 1)
             # warp the canonical coordinates
             XYwarpHomP = refMtrxP.matmul(XYhom)
-            XwarpHomP,YwarpHomP,ZwarpHomP = torch.unbind(XYwarpHomP,dim=1)
-            XwarpP = (XwarpHomP/(ZwarpHomP+1e-8)).resize_((args.batch_size,flow_loader_h,flow_loader_w))
-            YwarpP = (YwarpHomP/(ZwarpHomP+1e-8)).resize_((args.batch_size,flow_loader_h,flow_loader_w))
+            XwarpHomP, YwarpHomP, ZwarpHomP = torch.unbind(XYwarpHomP, dim=1)
+            XwarpP = (XwarpHomP/(ZwarpHomP+1e-8)).resize_((args.batch_size, flow_loader_h, flow_loader_w))
+            YwarpP = (YwarpHomP/(ZwarpHomP+1e-8)).resize_((args.batch_size, flow_loader_h, flow_loader_w))
             # get grid for resampling
             XwarpP = 2 * ((XwarpP / (flow_loader_w - 1)) - 0.5)
             YwarpP = 2 * ((YwarpP / (flow_loader_h - 1)) - 0.5)
-            gridP = torch.stack([XwarpP,YwarpP],dim=-1)
+            gridP = torch.stack([XwarpP, YwarpP], dim=-1)
             # sampling with bilinear interpolation
-            patch_var_past = torch.nn.functional.grid_sample(patch_var,gridP,mode="bilinear")
-            mask_var_past = torch.nn.functional.grid_sample(mask_var,gridP,mode="bilinear")
+            patch_var_past = torch.nn.functional.grid_sample(patch_var, gridP, mode="bilinear")
+            mask_var_past = torch.nn.functional.grid_sample(mask_var, gridP, mode="bilinear")
 
         adv_tgt_img_var = torch.mul((1-mask_var), tgt_img_var) + torch.mul(mask_var, patch_var)
         adv_ref_past_img_var = torch.mul((1-mask_var_past), ref_past_img_var) + torch.mul(mask_var_past, patch_var_past)
@@ -352,7 +358,7 @@ def main():
         errors.update([epe, adv_epe, cos_sim, adv_cos_sim])
 
         if i % 1 == 0:
-            index = i #int(i//10)
+            index = i  # int(i//10)
             imgs = normalize([tgt_img] + [ref_img_past] + [ref_img])
             norm_tgt_img = imgs[0]
             norm_ref_img_past = imgs[1]
@@ -361,12 +367,12 @@ def main():
             patch_cpu = patch_var.data[0].cpu()
             mask_cpu = mask_var.data[0].cpu()
 
-            adv_norm_tgt_img = normalize(adv_tgt_img_var.data.cpu()) #torch.mul((1-mask_cpu), norm_tgt_img) + torch.mul(mask_cpu, patch_cpu)
-            adv_norm_ref_img_past = normalize(adv_ref_past_img_var.data.cpu()) # torch.mul((1-mask_cpu), norm_ref_img_past) + torch.mul(mask_cpu, patch_cpu)
-            adv_norm_ref_img = normalize(adv_ref_img_var.data.cpu()) #torch.mul((1-mask_cpu), norm_ref_img) + torch.mul(mask_cpu, patch_cpu)
+            adv_norm_tgt_img = normalize(adv_tgt_img_var.data.cpu())  # torch.mul((1-mask_cpu), norm_tgt_img) + torch.mul(mask_cpu, patch_cpu)
+            adv_norm_ref_img_past = normalize(adv_ref_past_img_var.data.cpu())  # torch.mul((1-mask_cpu), norm_ref_img_past) + torch.mul(mask_cpu, patch_cpu)
+            adv_norm_ref_img = normalize(adv_ref_img_var.data.cpu())  # torch.mul((1-mask_cpu), norm_ref_img) + torch.mul(mask_cpu, patch_cpu)
 
             output_writer.add_image('val flow Input', transpose_image(tensor2array(norm_tgt_img[0])), 0)
-            flow_to_show = flow_gt[0][:2,:,:].cpu()
+            flow_to_show = flow_gt[0][:2, :, :].cpu()
             output_writer.add_image('val target Flow', transpose_image(flow_to_image(tensor2array(flow_to_show))), 0)
 
             # set flow to zero
@@ -378,8 +384,8 @@ def main():
             val_GT_adv = flow_gt_var_adv.data[0].cpu().numpy().transpose(1, 2, 0)
             # val_GT_adv = interp_gt_flow(val_GT_adv[:,:,:2], val_GT_adv[:,:,2])
             val_GT_adv = cv2.resize(val_GT_adv, (flow_loader_w, flow_loader_h), interpolation=cv2.INTER_NEAREST)
-            val_GT_adv[:,:,0] = val_GT_adv[:,:,0] * (flow_loader_w/w_gt)
-            val_GT_adv[:,:,1] = val_GT_adv[:,:,1] * (flow_loader_h/h_gt)
+            val_GT_adv[:, :, 0] = val_GT_adv[:, :, 0] * (flow_loader_w/w_gt)
+            val_GT_adv[:, :, 1] = val_GT_adv[:, :, 1] * (flow_loader_h/h_gt)
 
             # gt normalization for visualization
             u = val_GT_adv[:, :, 0]
@@ -391,7 +397,7 @@ def main():
             maxrad = np.max(rad)
 
             val_GT_adv_Output = flow_to_image(val_GT_adv, maxrad)
-            val_GT_adv_Output = cv2.erode(val_GT_adv_Output, np.ones((3,3), np.uint8), iterations = 1) # make points thicker
+            val_GT_adv_Output = cv2.erode(val_GT_adv_Output, np.ones((3, 3), np.uint8), iterations=1)  # make points thicker
             val_GT_adv_Output = transpose_image(val_GT_adv_Output) / 255.
             val_Flow_Output = transpose_image(flow_to_image(tensor2array(flow_fwd.data[0].cpu()), maxrad)) / 255.
             val_adv_Flow_Output = transpose_image(flow_to_image(tensor2array(adv_flow_fwd.data[0].cpu()), maxrad)) / 255.
@@ -412,14 +418,13 @@ def main():
             # val_output_viz = np.concatenate((val_adv_tgt_image, val_adv_ref_image, val_Flow_Output, val_adv_Flow_Output, val_Diff_Flow_Output, val_GT_adv_Output), 2)
             val_output_viz = np.concatenate((val_ref_image, val_adv_ref_image, val_Flow_Output, val_adv_Flow_Output, val_Diff_Flow_Output, val_GT_adv_Output), 2)
             val_output_viz_im = Image.fromarray((255*val_output_viz.transpose(1, 2, 0)).astype('uint8'))
-            val_output_viz_im.save(args.save_path/args.name+'viz'+str(i).zfill(3)+'.jpg')
+            val_output_viz_im.save(output_vis_dir / 'viz'+str(i).zfill(3)+'.jpg')
             output_writer.add_image('val Output viz {}'.format(index), val_output_viz, 0)
 
-            #val_output_viz = np.vstack((val_Flow_Output, val_adv_Flow_Output, val_Diff_Flow_Output, val_adv_tgt_image, val_adv_ref_image))
-            #scipy.misc.imsave('outfile.jpg', os.path.join(output_vis_dir, 'vis_{}.png'.format(index)))
+            # val_output_viz = np.vstack((val_Flow_Output, val_adv_Flow_Output, val_Diff_Flow_Output, val_adv_tgt_image, val_adv_ref_image))
+            # scipy.misc.imsave('outfile.jpg', os.path.join(output_vis_dir, 'vis_{}.png'.format(index)))
 
             result_scene_file.write("{:10d}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}\n".format(i, epe, adv_epe, cos_sim, adv_cos_sim))
-
 
     print("{:>10}, {:>10}, {:>10}, {:>10}".format(*error_names))
     print("{:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}".format(*errors.avg))
@@ -428,6 +433,7 @@ def main():
 
     result_file.close()
     result_scene_file.close()
+
 
 if __name__ == '__main__':
     main()

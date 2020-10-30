@@ -14,7 +14,7 @@ class TermLogger(object):
         e = 1   # epoch bar position
         tr = 3  # train bar position
         ts = 6  # valid bar position
-        ta = 9 # attack bar position
+        ta = 9  # attack bar position
         h = self.t.height
 
         for i in range(10):
@@ -42,6 +42,7 @@ class TermLogger(object):
 
     def reset_attack_bar(self):
         self.attack_bar = progressbar.ProgressBar(maxval=self.attack_size, fd=self.attack_bar_writer).start()
+
 
 class Writer(object):
     """Create an object with a write method that writes to a
@@ -86,7 +87,7 @@ class AverageMeter(object):
             val = [val]
         assert(len(val) == self.meters)
         self.count += n
-        for i,v in enumerate(val):
+        for i, v in enumerate(val):
             self.val[i] = v
             self.sum[i] += v * n
             self.avg[i] = self.sum[i] / self.count
