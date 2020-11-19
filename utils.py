@@ -14,12 +14,15 @@ from torch.autograd import Variable
 from scipy.ndimage.interpolation import rotate, zoom
 from PIL import Image
 
+
 def load_as_float(path):
     return np.array(Image.open(path)).astype(np.float32)
+
 
 def imresize(arr, sz):
     height, width = sz
     return np.array(Image.fromarray(arr.astype('uint8')).resize((width, height), resample=Image.BILINEAR))
+
 
 def tensor2array(tensor, max_value=255, colormap='rainbow'):
     if max_value is None:
@@ -41,14 +44,18 @@ def tensor2array(tensor, max_value=255, colormap='rainbow'):
         except ImportError:
             if tensor.ndimension() == 2:
                 tensor.unsqueeze_(2)
-            array = (tensor.expand(tensor.size(0), tensor.size(1), 3).numpy()/max_value).clip(0,1)
+            array = (tensor.expand(tensor.size(0), tensor.size(1), 3).numpy()/max_value).clip(0, 1)
 
     elif tensor.ndimension() == 3:
         if (tensor.size(0) == 3):
-            array = 0.5 + tensor.numpy().transpose(1, 2, 0)*0.5
+            if tensor.min() >= 0 and tensor.max() <= 1:
+                array = tensor.numpy().transpose(1, 2, 0)
+            else:
+                array = 0.5 + tensor.numpy().transpose(1, 2, 0)*0.5
         elif (tensor.size(0) == 2):
             array = tensor.numpy().transpose(1, 2, 0)
     return array
+
 
 def transpose_image(array):
     return array.transpose(2, 0, 1)
@@ -58,11 +65,12 @@ def save_checkpoint(save_path, dispnet_state, exp_pose_state, flownet_state, opt
     file_prefixes = ['dispnet', 'exp_pose', 'flownet', 'optimizer']
     states = [dispnet_state, exp_pose_state, flownet_state, optimizer_state]
     for (prefix, state) in zip(file_prefixes, states):
-        torch.save(state, save_path/'{}_{}'.format(prefix,filename))
+        torch.save(state, save_path/'{}_{}'.format(prefix, filename))
 
     if is_best:
         for prefix in file_prefixes:
-            shutil.copyfile(save_path/'{}_{}'.format(prefix,filename), save_path/'{}_model_best.pth.tar'.format(prefix))
+            shutil.copyfile(save_path/'{}_{}'.format(prefix, filename), save_path/'{}_model_best.pth.tar'.format(prefix))
+
 
 def submatrix(arr):
     x, y = np.nonzero(arr)
@@ -71,6 +79,7 @@ def submatrix(arr):
     # And don't forget to add 1 to the top bound to avoid the fencepost problem.
     return arr[x.min():x.max()+1, y.min():y.max()+1]
 
+
 def crop_patch(patch):
     pass
 
@@ -78,6 +87,7 @@ def crop_patch(patch):
 class ToSpaceBGR(object):
     def __init__(self, is_bgr):
         self.is_bgr = is_bgr
+
     def __call__(self, tensor):
         if self.is_bgr:
             new_tensor = tensor.clone()
@@ -90,16 +100,18 @@ class ToSpaceBGR(object):
 class ToRange255(object):
     def __init__(self, is_255):
         self.is_255 = is_255
+
     def __call__(self, tensor):
         if self.is_255:
             tensor.mul_(255)
         return tensor
 
+
 def createCircularMask(h, w, center=None, radius=None):
 
-    if center is None: # use the middle of the image
+    if center is None:  # use the middle of the image
         center = [int(w/2), int(h/2)]
-    if radius is None: # use the smallest distance between the center and image walls
+    if radius is None:  # use the smallest distance between the center and image walls
         radius = min(center[0], center[1], w-center[0], h-center[1])-2
 
     Y, X = np.ogrid[:h, :w]
@@ -108,14 +120,15 @@ def createCircularMask(h, w, center=None, radius=None):
     mask = dist_from_center <= radius
     return mask
 
+
 def init_patch_circle(image_size, patch_size):
     patch, patch_shape = init_patch_square(image_size, patch_size)
     mask = createCircularMask(patch_shape[-2], patch_shape[-1]).astype('float32')
-    mask = np.array([[mask,mask,mask]])
+    mask = np.array([[mask, mask, mask]])
     return patch, mask, patch.shape
 
 
-def circle_transform(patch, mask, patch_init, data_shape, patch_shape, margin=0, center=False, norotate=False, fixed_loc=(-1,-1)):
+def circle_transform(patch, mask, patch_init, data_shape, patch_shape, margin=0, center=False, norotate=False, fixed_loc=(-1, -1)):
     # get dummy image
     patch = patch + np.random.random()*0.1 - 0.05
     patch = np.clip(patch, 0., 1.)
@@ -148,15 +161,15 @@ def circle_transform(patch, mask, patch_init, data_shape, patch_shape, margin=0,
             if center:
                 random_x = (image_w - m_size) // 2
             else:
-                random_x = m_size + margin + np.random.choice(image_w - 2*m_size - 2*margin -2)
+                random_x = m_size + margin + np.random.choice(image_w - 2*m_size - 2*margin - 2)
             assert(random_x + m_size < x.shape[-1])
-                # while random_x + m_size > x.shape[-1]:
-                #     random_x = np.random.choice(image_w - m_size - 1)
+            # while random_x + m_size > x.shape[-1]:
+            #     random_x = np.random.choice(image_w - m_size - 1)
             # random_y = m_size + np.random.choice(image_h - 2*m_size -2)
             if center:
                 random_y = (image_h - m_size) // 2
             else:
-                random_y = m_size + np.random.choice(image_h - 2*m_size -2)
+                random_y = m_size + np.random.choice(image_h - 2*m_size - 2)
             assert(random_y + m_size < x.shape[-2])
     #            while random_y + m_size > x.shape[-2]:
     #                random_y = np.random.choice(image_h)
@@ -181,25 +194,26 @@ def circle_transform(patch, mask, patch_init, data_shape, patch_shape, margin=0,
 
     return x, xm, xp, random_x, random_y, patch_shape
 
+
 def init_patch_square(image_size, patch_size):
     # get mask
     # image_size = image_size**2
     noise_size = image_size*patch_size
-    noise_dim = int(noise_size) #**(0.5))
+    noise_dim = int(noise_size)  # **(0.5))
     patch = np.random.rand(1, 3, noise_dim, noise_dim)
     return patch, patch.shape
+
 
 def init_patch_from_image(image_path, mask_path, image_size, patch_size):
     noise_size = np.floor(image_size*np.sqrt(patch_size))
     patch_image = load_as_float(image_path)
-    return patch, mask, patch.shape
-    patch_image = imresize(patch_image, (int(noise_size), int(noise_size)))/128. -1
-    patch = np.array([patch_image.transpose(2,0,1)])
+    patch_image = imresize(patch_image, (int(noise_size), int(noise_size)))/128. - 1
+    patch = np.array([patch_image.transpose(2, 0, 1)])
 
     mask_image = load_as_float(mask_path)
     mask_image = imresize(mask_image, (int(noise_size), int(noise_size)))/256.
-    mask = np.array([mask_image.transpose(2,0,1)])
-
+    mask = np.array([mask_image.transpose(2, 0, 1)])
+    return patch, mask, patch.shape
 
 
 def square_transform(patch, mask, patch_init, data_shape, patch_shape, norotate=False):

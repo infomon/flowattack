@@ -12,7 +12,7 @@ parser.add_argument('--scale', dest='scale', type=int, default=8,
 parser.add_argument('--output_path', dest='output_path', default='results',
                     help='output dir')
 parser.add_argument('--output_name', dest='output_name', default='this_is_your_patch',
-                    help='output dir')
+                    help='output name')
 
 
 def main():
@@ -30,7 +30,7 @@ def main():
     patch_im = Image.fromarray(patch_im.astype('uint8'))
     sz = patch_im.size
     patch_im = patch_im.resize((sz[0]*args.scale, sz[1]*args.scale))
-    patch_im.save('%s/%s.jpg' % (args.output_path, args.output_name))
+    patch_im.save('%s/%s.png' % (args.output_path, args.output_name))
 
 
 if __name__ == '__main__':

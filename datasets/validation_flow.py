@@ -271,7 +271,7 @@ class ValidationFlowKitti2012(data.Dataset):
         #    tgt_img = cv2.imencode('.jpg', tgt_img, encode_param)
         #    ref_img_future = cv2.imencode('.jpg', ref_img_future, encode_param)
 
-        return ref_img_past, tgt_img, ref_img_future, gtFlow, None, None, None
+        return ref_img_past, tgt_img, ref_img_future, gtFlow, {}, {}, {}
 
     def __len__(self):
         return self.N

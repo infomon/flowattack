@@ -22,19 +22,18 @@ from logger import AverageMeter
 from losses import compute_cossim, compute_epe, multiscale_cossim
 import models
 from utils import *
+from utils_model import fetch_model
 print(torch.cuda.is_available())
-
-
 
 epsilon = 1e-8
 
 parser = argparse.ArgumentParser(description='Test Adversarial attacks on Optical Flow Networks',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--name', dest='name', default='', required=True,
-                    help='path to dataset')
-parser.add_argument('--pretrained', dest='pretrained', default='', required=True,
-                    help='path to dataset')
-parser.add_argument('--patch_path', dest='patch_path', default='', required=True,
+                    help='Save path')
+parser.add_argument('--instance', dest='instance', default='', required=True,
+                    help='Specific instance')
+parser.add_argument('--patch_name', dest='patch_name', default='', required=True,
                     help='path to patches')
 parser.add_argument('--whole_img', dest='whole_img', default=0.0, type=float,
                     help='Test whole image attack')
@@ -67,17 +66,18 @@ def main():
     global args
     args = parser.parse_args()
     save_path = Path(args.name)
-    args.save_path = save_path / 'results'  # /timestamp
+    args.save_path = save_path / args.flownet / args.instance
     print('=> will save everything to {}'.format(args.save_path))
     args.save_path.makedirs_p()
-    output_vis_dir = args.save_path / 'images'
+    output_vis_dir = args.save_path / 'images_test'
     output_vis_dir.makedirs_p()
 
-    pretrained_path = Path(args.pretrained)
+    pretrained_path = Path(args.name) / 'pretrained_models'
+    patch_path = args.save_path / 'patches' / args.patch_name
 
     args.batch_size = 1
 
-    output_writer = SummaryWriter(args.save_path/'valid')
+    output_writer = SummaryWriter(args.save_path/'valid_test')
 
     # Data loading code
     flow_loader_h, flow_loader_w = 384, 1280
@@ -97,53 +97,28 @@ def main():
     elif args.valset == "kitti2012":
         from datasets.validation_flow import ValidationFlowKitti2012
         # val_set = ValidationFlowKitti2012(root='/is/ps2/aranjan/AllFlowData/kitti/kitti2012', transform=valid_transform, compression=args.compression)
-        val_set = ValidationFlowKitti2012(root='/misc/lmbraid19/schrodi/KITTI/2012_val', transform=valid_transform, compression=args.compression, raw_root='/misc/lmbraid19/schrodi/KITTI/2012/raw')
+        val_set = ValidationFlowKitti2012(root='/misc/lmbraid19/schrodi/KITTI/2012_val', transform=valid_transform, compression=args.compression)
 
     print('{} samples found in valid scenes'.format(len(val_set)))
 
     # batch size is 1 since images in kitti have different sizes
     val_loader = torch.utils.data.DataLoader(val_set, batch_size=1, shuffle=False, num_workers=args.workers, pin_memory=True, drop_last=True)
 
-    result_file = open(os.path.join(args.save_path, 'results.csv'), 'a')
-    result_scene_file = open(os.path.join(args.save_path, 'result_scenes.csv'), 'a')
+    result_file = open(os.path.join(args.save_path, 'test_results.csv'), 'a')
+    result_scene_file = open(os.path.join(args.save_path, 'test_result_scenes.csv'), 'a')
 
     # create model
     print("=> fetching model")
-
-    if args.flownet == 'SpyNet':
-        flow_net = getattr(models, args.flownet)(nlevels=6, pretrained=True)
-    elif args.flownet == 'Back2Future':
-        flow_net = getattr(models, args.flownet)(pretrained=pretrained_path/'b2f_rm_hard.pth.tar')
-    elif args.flownet == 'PWCNet':
-        flow_net = models.pwc_dc_net(pretrained_path/'pwc_net_chairs.pth.tar')  # pwc_net.pth.tar')
-    else:
-        flow_net = getattr(models, args.flownet)()
-
-    if args.flownet in ['SpyNet', 'Back2Future', 'PWCNet']:
-        print("=> using pre-trained weights for " + args.flownet)
-    elif args.flownet in ['FlowNetC']:
-        print("=> using pre-trained weights for FlowNetC")
-        weights = torch.load(pretrained_path / 'FlowNet2-C_checkpoint.pth.tar')
-        flow_net.load_state_dict(weights['state_dict'])
-    elif args.flownet in ['FlowNetS']:
-        print("=> using pre-trained weights for FlowNetS")
-        weights = torch.load(pretrained_path/'flownets.pth.tar')
-        flow_net.load_state_dict(weights['state_dict'])
-    elif args.flownet in ['FlowNet2']:
-        print("=> using pre-trained weights for FlowNet2")
-        weights = torch.load(pretrained_path/'FlowNet2_checkpoint.pth.tar')
-        flow_net.load_state_dict(weights['state_dict'])
-    else:
-        flow_net.init_weights()
+    flow_net = fetch_model(pretrained_path=pretrained_path, args=args)
 
     flow_net = flow_net.cuda()
 
     cudnn.benchmark = True
     if args.whole_img == 0 and args.compression == 0:
-        print("Loading patch from ", args.patch_path)
-        # patch = torch.load(args.patch_path)
-        image = Image.open(args.patch_path)
-        patch = TF.to_tensor(image).unsqueeze(0)
+        print("Loading patch from ", patch_path)
+        patch = torch.load(patch_path)
+        #image = Image.open(patch_path)
+        #patch = TF.to_tensor(image).unsqueeze(0)
         patch_shape = patch.shape
         if args.mask_path:
             mask_image = load_as_float(args.mask_path)
@@ -198,7 +173,7 @@ def main():
         random_y = args.fixed_loc_y
         if args.whole_img == 0:
             if args.patch_type == 'circle':
-                patch_full, mask_full, _, random_x, random_y, _ = circle_transform(patch, mask, patch.clone(), data_shape, patch_shape, margin, norotate=args.norotate, fixed_loc=(random_x, random_y))
+                patch_full, mask_full, _, random_x, random_y, _ = circle_transform(patch, mask, patch.copy(), data_shape, patch_shape, margin, norotate=args.norotate, fixed_loc=(random_x, random_y))
             elif args.patch_type == 'square':
                 patch_full, mask_full, _, _, _ = square_transform(patch, mask, patch.clone(), data_shape, patch_shape, norotate=args.norotate)
             patch_full, mask_full = torch.FloatTensor(patch_full), torch.FloatTensor(mask_full)

@@ -8,34 +8,36 @@ import numpy as np
 from .submodules import *
 'Parameter count , 39,175,298 '
 
+
 class FlowNetC(nn.Module):
-    def __init__(self,batchNorm=False, div_flow = 20):
-        super(FlowNetC,self).__init__()
+    def __init__(self, batchNorm=False, div_flow=20, return_feat_maps=False):
+        super(FlowNetC, self).__init__()
 
         self.rgb_max = 1
         self.batchNorm = batchNorm
         self.div_flow = div_flow
+        self.return_feat_maps = return_feat_maps
 
-        self.conv1   = conv(self.batchNorm,   3,   64, kernel_size=7, stride=2)
-        self.conv2   = conv(self.batchNorm,  64,  128, kernel_size=5, stride=2)
-        self.conv3   = conv(self.batchNorm, 128,  256, kernel_size=5, stride=2)
-        self.conv_redir  = conv(self.batchNorm, 256,   32, kernel_size=1, stride=1)
+        self.conv1 = conv(self.batchNorm, 3, 64, kernel_size=7, stride=2)
+        self.conv2 = conv(self.batchNorm, 64, 128, kernel_size=5, stride=2)
+        self.conv3 = conv(self.batchNorm, 128, 256, kernel_size=5, stride=2)
+        self.conv_redir = conv(self.batchNorm, 256, 32, kernel_size=1, stride=1)
 
-        self.corr = correlate #Correlation(pad_size=20, kernel_size=1, max_displacement=20, stride1=1, stride2=2, corr_multiply=1)
+        self.corr = correlate  # Correlation(pad_size=20, kernel_size=1, max_displacement=20, stride1=1, stride2=2, corr_multiply=1)
 
         self.corr_activation = nn.LeakyReLU(0.1, inplace=True)
-        self.conv3_1 = conv(self.batchNorm, 473,  256)
-        self.conv4   = conv(self.batchNorm, 256,  512, stride=2)
-        self.conv4_1 = conv(self.batchNorm, 512,  512)
-        self.conv5   = conv(self.batchNorm, 512,  512, stride=2)
-        self.conv5_1 = conv(self.batchNorm, 512,  512)
-        self.conv6   = conv(self.batchNorm, 512, 1024, stride=2)
-        self.conv6_1 = conv(self.batchNorm,1024, 1024)
+        self.conv3_1 = conv(self.batchNorm, 473, 256)
+        self.conv4 = conv(self.batchNorm, 256, 512, stride=2)
+        self.conv4_1 = conv(self.batchNorm, 512, 512)
+        self.conv5 = conv(self.batchNorm, 512, 512, stride=2)
+        self.conv5_1 = conv(self.batchNorm, 512, 512)
+        self.conv6 = conv(self.batchNorm, 512, 1024, stride=2)
+        self.conv6_1 = conv(self.batchNorm, 1024, 1024)
 
-        self.deconv5 = deconv(1024,512)
-        self.deconv4 = deconv(1026,256)
-        self.deconv3 = deconv(770,128)
-        self.deconv2 = deconv(386,64)
+        self.deconv5 = deconv(1024, 512)
+        self.deconv4 = deconv(1026, 256)
+        self.deconv3 = deconv(770, 128)
+        self.deconv2 = deconv(386, 64)
 
         self.predict_flow6 = predict_flow(1024)
         self.predict_flow5 = predict_flow(1026)
@@ -77,19 +79,36 @@ class FlowNetC(nn.Module):
 
         x1 = self.normalize(x1)
         x2 = self.normalize(x2)
+
+        if self.return_feat_maps:
+            return_feat_maps = []
+
         # FlownetC top input stream
         out_conv1a = self.conv1(x1)
+        if self.return_feat_maps:
+            return_feat_maps.append(out_conv1a.clone())
         out_conv2a = self.conv2(out_conv1a)
+        if self.return_feat_maps:
+            return_feat_maps.append(out_conv2a.clone())
         out_conv3a = self.conv3(out_conv2a)
+        if self.return_feat_maps:
+            return_feat_maps.append(out_conv3a.clone())
 
         # FlownetC bottom input stream
         out_conv1b = self.conv1(x2)
-
+        if self.return_feat_maps:
+            return_feat_maps.append(out_conv1b.clone())
         out_conv2b = self.conv2(out_conv1b)
+        if self.return_feat_maps:
+            return_feat_maps.append(out_conv2b.clone())
         out_conv3b = self.conv3(out_conv2b)
+        if self.return_feat_maps:
+            return_feat_maps.append(out_conv3b.clone())
 
         # Merge streams
-        out_corr = self.corr(out_conv3a, out_conv3b) # False
+        out_corr = self.corr(out_conv3a, out_conv3b)  # False
+        if self.return_feat_maps:
+            return_feat_maps.append(out_corr.clone())
         out_corr = self.corr_activation(out_corr)
 
         # Redirect top input stream and concatenate
@@ -105,30 +124,33 @@ class FlowNetC(nn.Module):
         out_conv5 = self.conv5_1(self.conv5(out_conv4))
         out_conv6 = self.conv6_1(self.conv6(out_conv5))
 
-        flow6       = self.predict_flow6(out_conv6)
-        flow6_up    = self.upsampled_flow6_to_5(flow6)
+        flow6 = self.predict_flow6(out_conv6)
+        flow6_up = self.upsampled_flow6_to_5(flow6)
         out_deconv5 = self.deconv5(out_conv6)
 
-        concat5 = torch.cat((out_conv5,out_deconv5,flow6_up),1)
+        concat5 = torch.cat((out_conv5, out_deconv5, flow6_up), 1)
 
-        flow5       = self.predict_flow5(concat5)
-        flow5_up    = self.upsampled_flow5_to_4(flow5)
+        flow5 = self.predict_flow5(concat5)
+        flow5_up = self.upsampled_flow5_to_4(flow5)
         out_deconv4 = self.deconv4(concat5)
-        concat4 = torch.cat((out_conv4,out_deconv4,flow5_up),1)
+        concat4 = torch.cat((out_conv4, out_deconv4, flow5_up), 1)
 
-        flow4       = self.predict_flow4(concat4)
-        flow4_up    = self.upsampled_flow4_to_3(flow4)
+        flow4 = self.predict_flow4(concat4)
+        flow4_up = self.upsampled_flow4_to_3(flow4)
         out_deconv3 = self.deconv3(concat4)
-        concat3 = torch.cat((out_conv3_1,out_deconv3,flow4_up),1)
+        concat3 = torch.cat((out_conv3_1, out_deconv3, flow4_up), 1)
 
-        flow3       = self.predict_flow3(concat3)
-        flow3_up    = self.upsampled_flow3_to_2(flow3)
+        flow3 = self.predict_flow3(concat3)
+        flow3_up = self.upsampled_flow3_to_2(flow3)
         out_deconv2 = self.deconv2(concat3)
-        concat2 = torch.cat((out_conv2a,out_deconv2,flow3_up),1)
+        concat2 = torch.cat((out_conv2a, out_deconv2, flow3_up), 1)
 
         flow2 = self.predict_flow2(concat2)
 
         if self.training:
             return self.upsample1(flow2*self.div_flow), self.upsample1(flow3*self.div_flow), self.upsample1(flow4*self.div_flow), self.upsample1(flow5*self.div_flow), self.upsample1(flow6*self.div_flow)
         else:
-           return self.upsample1(flow2*self.div_flow)
+            if self.return_feat_maps:
+                return self.upsample1(flow2*self.div_flow), return_feat_maps
+            else:
+                return self.upsample1(flow2*self.div_flow)

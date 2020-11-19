@@ -18,6 +18,7 @@ from datasets.sequence_folders import SequenceFolder
 import custom_transforms
 import models
 from utils import *
+from utils_model import fetch_model
 from logger import TermLogger, AverageMeter
 from path import Path
 from itertools import chain
@@ -29,8 +30,6 @@ epsilon = 1e-8
 
 parser = argparse.ArgumentParser(description='Generating Adversarial Patches for Optical Flow Networks',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--pretrained', dest='pretrained', default='', required=True,
-                    help='path to dataset')
 parser.add_argument('--train-data', dest='train_data', default='/path/to/train/dataset', required=True,
                     help='path to kitti train dataset')
 parser.add_argument('--val-data', dest='val_data', default='/path/to/val/dataset', required=True,
@@ -66,7 +65,7 @@ parser.add_argument('--print-freq', default=10, type=int,
                     metavar='N', help='print frequency')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
-parser.add_argument('--flownet', dest='flownet', type=str, default='FlowNetC', choices=['FlowNetS', 'PWCNet', 'Back2Future', 'FlowNetC', 'SpyNet', 'FlowNet2'],
+parser.add_argument('--flownet', dest='flownet', type=str, default='FlowNetC', choices=['FlowNetS', 'FlowNetS_BN', 'PWCNet', 'Back2Future', 'FlowNetC', 'SpyNet', 'FlowNet2'],
                     help='flow network architecture. Options: FlowNetS | SpyNet')
 parser.add_argument('--alpha', default=0.0, type=float,
                     help='regularization weight')
@@ -99,13 +98,18 @@ def main():
     global args, best_error, n_iter
     args = parser.parse_args()
     save_path = Path(args.name)
-    args.save_path = save_path #/ 'checkpoints'  # /timestamp
+    args.save_path = save_path / args.flownet / f'ps_{str(int(args.patch_size*384))}' / f'lr1e{int(np.log10(args.lr))}_{args.seed}'
     print('=> will save everything to {}'.format(args.save_path))
     args.save_path.makedirs_p()
+
+    pretrained_path = Path(args.name) / 'pretrained_models'
+    patch_save_path = args.save_path / 'patches'
+    patch_save_path.makedirs_p()
+
     torch.manual_seed(args.seed)
 
     training_writer = SummaryWriter(args.save_path/'train')
-    output_writer = SummaryWriter(args.save_path/'valid')
+    output_writer = SummaryWriter(args.save_path/'valid_attack')
 
     # Data loading code
     flow_loader_h, flow_loader_w = 384, 1280
@@ -136,52 +140,25 @@ def main():
         from datasets.validation_flow import ValidationFlowKitti2012
         val_set = ValidationFlowKitti2012(
             root=args.val_data, transform=valid_transform)
-        raise Exception('TODO - Unknown error')
 
     if args.DEBUG:
-        train_set.__len__ = 32
-        train_set.samples = train_set.samples[:32]
+        train_set_len = 8  # 32
+        train_set.__len__ = train_set_len
+        train_set.samples = train_set.samples[:train_set_len]
 
     print('{} samples found in {} train scenes'.format(len(train_set), len(train_set.scenes)))
     print('{} samples found in valid scenes'.format(len(val_set)))
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=1, shuffle=True,
-                                               num_workers=args.workers, pin_memory=True, drop_last=True)
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=1, shuffle=True, num_workers=args.workers, pin_memory=True, drop_last=True)
 
-    val_loader = torch.utils.data.DataLoader(val_set, batch_size=1,               # batch size is 1 since images in kitti have different sizes
-                                             shuffle=False, num_workers=args.workers, pin_memory=True, drop_last=True)
+    # batch size is 1 since images in kitti have different sizes
+    val_loader = torch.utils.data.DataLoader(val_set, batch_size=1, shuffle=False, num_workers=args.workers, pin_memory=True, drop_last=True)
 
     if args.epoch_size == 0:
         args.epoch_size = len(train_loader)
 
     # create model
     print("=> creating model")
-    pretrained_path = Path(args.pretrained)
-    if args.flownet == 'SpyNet':
-        flow_net = getattr(models, args.flownet)(nlevels=6, pretrained=True)
-    elif args.flownet == 'Back2Future':
-        flow_net = getattr(models, args.flownet)(
-            pretrained=pretrained_path/'b2f_rm_hard.pth.tar')
-    elif args.flownet == 'PWCNet':
-        flow_net = models.pwc_dc_net(pretrained_path/'pwc_net_chairs.pth.tar')
-    else:
-        flow_net = getattr(models, args.flownet)()
-
-    if args.flownet in ['SpyNet', 'Back2Future', 'PWCNet']:
-        print("=> using pre-trained weights for " + args.flownet)
-    elif args.flownet in ['FlowNetC']:
-        print("=> using pre-trained weights for FlowNetC")
-        weights = torch.load(pretrained_path/'FlowNet2-C_checkpoint.pth.tar')
-        flow_net.load_state_dict(weights['state_dict'])
-    elif args.flownet in ['FlowNetS']:
-        print("=> using pre-trained weights for FlowNetS")
-        weights = torch.load(pretrained_path/'flownets.pth.tar')
-        flow_net.load_state_dict(weights['state_dict'])
-    elif args.flownet in ['FlowNet2']:
-        print("=> using pre-trained weights for FlowNet2")
-        weights = torch.load(pretrained_path/'FlowNet2_checkpoint.pth.tar')
-        flow_net.load_state_dict(weights['state_dict'])
-    else:
-        flow_net.init_weights()
+    flow_net = fetch_model(pretrained_path=pretrained_path, args=args)
 
     pytorch_total_params = sum(p.numel() for p in flow_net.parameters())
     print("Number of model paramters: " + str(pytorch_total_params))
@@ -235,7 +212,7 @@ def main():
         for error, name in zip(errors, error_names):
             training_writer.add_scalar(name, error, epoch)
 
-        torch.save(patch, args.save_path/'patch_epoch_{}'.format(str(epoch)))
+        torch.save(patch, patch_save_path / 'epoch_{}'.format(str(epoch)))
 
     if args.log_terminal:
         logger.epoch_bar.finish()
@@ -267,11 +244,12 @@ def train(patch, mask, patch_init, patch_shape, train_loader, flow_net, epoch, l
         data_shape = tgt_img.cpu().numpy().shape
 
         if args.patch_type == 'circle':
+            # TODO true at the end?
+            # patch, mask, patch_init, rx, ry, patch_shape = circle_transform(patch, mask, patch_init, data_shape, patch_shape, True)
             patch, mask, patch_init, rx, ry, patch_shape = circle_transform(
-                patch, mask, patch_init, data_shape, patch_shape, True)
+                patch, mask, patch_init, data_shape, patch_shape)
         elif args.patch_type == 'square':
-            patch, mask, patch_init, rx, ry = square_transform(
-                patch, mask, patch_init, data_shape, patch_shape, norotate=args.norotate)
+            patch, mask, patch_init, rx, ry = square_transform(patch, mask, patch_init, data_shape, patch_shape, norotate=args.norotate)
         patch, mask = torch.FloatTensor(patch), torch.FloatTensor(mask)
         patch_init = torch.FloatTensor(patch_init)
 
@@ -308,6 +286,7 @@ def train(patch, mask, patch_init, patch_shape, train_loader, flow_net, epoch, l
             1, 1, patch_shape_orig[2]/patch_shape[2], patch_shape_orig[3]/patch_shape[3]), order=0)
         patch_init = zoom(patch_init, zoom=(
             1, 1, patch_shape_orig[2]/patch_shape[2], patch_shape_orig[3]/patch_shape[3]), order=1)
+        patch_shape = patch.shape
 
         if args.training_output_freq > 0 and n_iter % args.training_output_freq == 0:
             train_writer.add_image('train tgt image', transpose_image(
@@ -485,7 +464,7 @@ def validate_flow_with_gt(patch, mask, patch_shape, val_loader, flow_net, epoch,
 
         errors.update([epe, adv_epe, cos_sim, adv_cos_sim])
 
-        if args.log_output and i % 10 == 0:
+        if args.log_output and i % 100 == 0:
             index = int(i//10)
             if epoch == 0:
                 output_writer.add_image(
@@ -509,6 +488,11 @@ def validate_flow_with_gt(patch, mask, patch_shape, val_loader, flow_net, epoch,
                 tensor2array(adv_ref_img_future_var.data.cpu()[0]))
             val_patch = transpose_image(tensor2array(patch_var.data.cpu()[0]))
 
+            if 'FlowNetS' in args.flownet:
+                val_Flow_Output = zoom(val_Flow_Output, zoom=(1, val_adv_tgt_image.shape[1]/val_Flow_Output.shape[1], val_adv_tgt_image.shape[2]/val_Flow_Output.shape[2]), order=1)
+                val_adv_Flow_Output = zoom(val_adv_Flow_Output, zoom=(1, val_adv_tgt_image.shape[1]/val_adv_Flow_Output.shape[1], val_adv_tgt_image.shape[2]/val_adv_Flow_Output.shape[2]), order=1)
+                val_Diff_Flow_Output = zoom(val_Diff_Flow_Output, zoom=(1, val_adv_tgt_image.shape[1]/val_Diff_Flow_Output.shape[1], val_adv_tgt_image.shape[2]/val_Diff_Flow_Output.shape[2]), order=1)
+
             if type(flow_net).__name__ == 'Back2Future':
                 val_output_viz = np.hstack((val_Flow_Output, val_adv_Flow_Output, val_Diff_Flow_Output,
                                             val_adv_ref_past_image, val_adv_tgt_image, val_adv_ref_future_image))
@@ -528,7 +512,4 @@ def validate_flow_with_gt(patch, mask, patch_shape, val_loader, flow_net, epoch,
 
 
 if __name__ == '__main__':
-    #import sys
-    # with open("experiment_recorder.md", "a") as f:
-    #    f.write('\n python3 ' + ' '.join(sys.argv))
     main()

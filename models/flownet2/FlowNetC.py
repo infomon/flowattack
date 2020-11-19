@@ -9,11 +9,12 @@ from ..submodules import *
 'Parameter count , 39,175,298 '
 
 class FlowNetC(nn.Module):
-    def __init__(self, batchNorm=True, div_flow = 20):
+    def __init__(self, batchNorm=True, div_flow = 20, return_corr=False):
         super(FlowNetC,self).__init__()
 
         self.batchNorm = batchNorm
         self.div_flow = div_flow
+        self.return_corr = return_corr
 
         self.conv1   = conv(self.batchNorm,   3,   64, kernel_size=7, stride=2)
         self.conv2   = conv(self.batchNorm,  64,  128, kernel_size=5, stride=2)
@@ -28,7 +29,7 @@ class FlowNetC(nn.Module):
         # else:
         self.corr = correlate #Correlation(pad_size=20, kernel_size=1, max_displacement=20, stride1=1, stride2=2, corr_multiply=1)
 
-        self.corr_activation = nn.LeakyReLU(0.1,inplace=True)
+        self.corr_activation = nn.LeakyReLU(0.1, inplace=True)
         self.conv3_1 = conv(self.batchNorm, 473,  256)
         self.conv4   = conv(self.batchNorm, 256,  512, stride=2)
         self.conv4_1 = conv(self.batchNorm, 512,  512)
@@ -82,6 +83,8 @@ class FlowNetC(nn.Module):
 
         # Merge streams
         out_corr = self.corr(out_conv3a, out_conv3b) # False
+        if self.return_corr:
+            return_corr = out_corr.clone()
         out_corr = self.corr_activation(out_corr)
 
         # Redirect top input stream and concatenate
@@ -123,4 +126,4 @@ class FlowNetC(nn.Module):
         if self.training:
             return flow2,flow3,flow4,flow5,flow6
         else:
-            return flow2,
+            return flow2, return_corr if self.return_corr else flow2,
